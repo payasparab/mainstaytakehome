@@ -89,7 +89,7 @@ def main():
     data = load_data()
     
     # Create tabs for different views
-    tab1, tab2, tab3 = st.tabs(["Calculated Performance Metrics", "Time Series Raw Metrics", "DownloadableRaw Data"])
+    tab1, tab2, tab3 = st.tabs(["Calculated Performance Metrics", "Time Series Raw Metrics", "Downloadable Raw Data"])
     
     # Create controls first
     with tab1:
