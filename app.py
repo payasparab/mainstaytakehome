@@ -32,13 +32,10 @@ def plot_selected_metrics(data_xs, selected_charts, chart_options, resample_peri
     """
     # Set up resampling based on selected period
     if resample_period == 'monthly':
-        # Only group numeric columns
-        numeric_data = data_xs[chart_options[selected_charts[0]]]  # Get only the metrics we want to plot
-        plot_data = numeric_data.groupby(data_xs['date'].dt.to_period('M')).mean()
+        plot_data = data_xs.groupby(data_xs['date'].dt.to_period('M')).mean()
         plot_data.index = plot_data.index.astype(str)
     elif resample_period == 'weekly':
-        numeric_data = data_xs[chart_options[selected_charts[0]]]
-        plot_data = numeric_data.groupby(data_xs['date'].dt.to_period('W')).mean()
+        plot_data = data_xs.groupby(data_xs['date'].dt.to_period('W')).mean()
         plot_data.index = plot_data.index.astype(str)
     else:  # daily
         plot_data = data_xs.set_index('date')
@@ -50,15 +47,16 @@ def plot_selected_metrics(data_xs, selected_charts, chart_options, resample_peri
     for chart_name in selected_charts:
         metrics = chart_options[chart_name]
         for metric in metrics:
-            fig.add_trace(
-                go.Scatter(
-                    x=plot_data.index,
-                    y=plot_data[metric],
-                    name=metric,
-                    mode='lines+markers',
-                    hovertemplate=f"{metric}: %{{y:.3f}}<br>Date: %{{x}}<extra></extra>"
+            if metric in plot_data.columns:  # Only plot if column exists
+                fig.add_trace(
+                    go.Scatter(
+                        x=plot_data.index,
+                        y=plot_data[metric],
+                        name=metric,
+                        mode='lines+markers',
+                        hovertemplate=f"{metric}: %{{y:.3f}}<br>Date: %{{x}}<extra></extra>"
+                    )
                 )
-            )
     
     # Add reference line for conversion vs market chart if needed
     if "Contract Conversion vs Market" in selected_charts:
@@ -79,7 +77,7 @@ def plot_selected_metrics(data_xs, selected_charts, chart_options, resample_peri
             xanchor="left",
             x=1.05
         ),
-        margin=dict(r=150)  # Add right margin for legend
+        margin=dict(r=150)
     )
 
     return fig
@@ -259,27 +257,44 @@ def main():
 
         elif show_separate_zip_codes:
             zip_codes_to_use = data['zip_code'].unique() if 'All' in selected_zip_codes else selected_zip_codes
-            agg_data = filtered_data.groupby(['date', 'zip_code'])[numeric_cols].sum().reset_index()
             metrics_data = pd.DataFrame()
+            new_metric_names = []  # Store the new column names
             
             for zip_code in zip_codes_to_use:
-                # Calculate metrics for this zip code
-                zip_subset = agg_data[agg_data['zip_code'] == zip_code]
-                zip_code_data = calculate_performance_metrics(zip_subset)
+                # First filter data for this zip code
+                zip_subset = filtered_data[filtered_data['zip_code'] == zip_code]
+                
+                # Aggregate the numeric columns
+                zip_agg = zip_subset.groupby('date')[numeric_cols].sum().reset_index()
+                
+                # Calculate performance metrics
+                zip_metrics = calculate_performance_metrics(zip_agg)
                 
                 # Only keep date and the metrics we want to plot
-                metrics_to_keep = ['date'] + chart_options[selected_chart]
-                zip_code_data = zip_code_data[metrics_to_keep].copy()
+                base_metrics = chart_options[selected_chart]
+                metrics_to_keep = ['date'] + base_metrics
+                zip_metrics = zip_metrics[metrics_to_keep].copy()
                 
                 # Rename columns with suffix (except date)
-                zip_code_data.columns = ['date' if col == 'date' else f'{col}_{zip_code}' 
-                                       for col in zip_code_data.columns]
+                new_columns = []
+                for col in zip_metrics.columns:
+                    if col == 'date':
+                        new_columns.append(col)
+                    else:
+                        new_name = f'{col}_{zip_code}'
+                        new_columns.append(new_name)
+                        new_metric_names.append(new_name)
+                
+                zip_metrics.columns = new_columns
                 
                 # Merge with existing data
                 if metrics_data.empty:
-                    metrics_data = zip_code_data
+                    metrics_data = zip_metrics
                 else:
-                    metrics_data = metrics_data.merge(zip_code_data, on='date')
+                    metrics_data = metrics_data.merge(zip_metrics, on='date')
+            
+            # Update chart options after all columns are created
+            chart_options[selected_chart] = new_metric_names
 
         else:
             # Original aggregation code
