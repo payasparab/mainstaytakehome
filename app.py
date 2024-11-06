@@ -163,10 +163,8 @@ def main():
                 key="price_bands_select"
             )
             
-            # Add checkbox for price bands (only shown when All is not selected)
-            show_separate_price_bands = False
-            if 'All' not in selected_price_bands and len(selected_price_bands) > 1:
-                show_separate_price_bands = st.checkbox('Show separate lines for each price band', key='price_bands_checkbox')
+            # Show checkbox for price bands (always available)
+            show_separate_price_bands = st.checkbox('Show separate lines for each price band', key='price_bands_checkbox')
             
             # Zip code filter
             zip_codes = ['All'] + list(data['zip_code'].unique())
@@ -177,10 +175,8 @@ def main():
                 key="zip_codes_select"
             )
             
-            # Add checkbox for zip codes (only shown when All is not selected)
-            show_separate_zip_codes = False
-            if 'All' not in selected_zip_codes and len(selected_zip_codes) > 1:
-                show_separate_zip_codes = st.checkbox('Show separate lines for each zip code', key='zip_codes_checkbox')
+            # Show checkbox for zip codes (always available)
+            show_separate_zip_codes = st.checkbox('Show separate lines for each zip code', key='zip_codes_checkbox')
         
         with control_col3:
             # Date range filters
@@ -202,37 +198,88 @@ def main():
         ]
         
         # Modify the data aggregation section before plotting
-        if show_separate_price_bands:
+        if show_separate_price_bands and show_separate_zip_codes:
+            # Handle both cross-sections
+            price_bands_to_use = data['price_band'].unique() if 'All' in selected_price_bands else selected_price_bands
+            zip_codes_to_use = data['zip_code'].unique() if 'All' in selected_zip_codes else selected_zip_codes
+            
+            agg_data = filtered_data.groupby(['date', 'price_band', 'zip_code'])[numeric_cols].sum().reset_index()
+            metrics_data = pd.DataFrame()
+            
+            for price_band in price_bands_to_use:
+                for zip_code in zip_codes_to_use:
+                    subset_data = calculate_performance_metrics(
+                        agg_data[(agg_data['price_band'] == price_band) & 
+                                (agg_data['zip_code'] == zip_code)]
+                    )
+                    # Only keep date and the metrics we want to plot
+                    metrics_to_keep = ['date'] + [col for col in chart_options[selected_chart]]
+                    subset_data = subset_data[metrics_to_keep].copy()
+                    
+                    # Rename columns with suffix
+                    subset_data.columns = ['date' if col == 'date' else f'{col}_{price_band}_{zip_code}' 
+                                         for col in subset_data.columns]
+                    
+                    if metrics_data.empty:
+                        metrics_data = subset_data
+                    else:
+                        metrics_data = metrics_data.merge(subset_data, on='date')
+            
+            # Update chart_options for the selected chart
+            chart_options[selected_chart] = [
+                f'{metric}_{band}_{zip}' 
+                for metric in chart_options[selected_chart]
+                for band in price_bands_to_use 
+                for zip in zip_codes_to_use
+            ]
+            
+        elif show_separate_price_bands:
+            price_bands_to_use = data['price_band'].unique() if 'All' in selected_price_bands else selected_price_bands
             agg_data = filtered_data.groupby(['date', 'price_band'])[numeric_cols].sum().reset_index()
             metrics_data = pd.DataFrame()
-            for price_band in selected_price_bands:
-                price_band_data = calculate_performance_metrics(agg_data[agg_data['price_band'] == price_band])
-                price_band_data.columns = [f'{col}_{price_band}' if col in chart_options[selected_chart] else col 
-                                         for col in price_band_data.columns]
+            
+            for price_band in price_bands_to_use:
+                price_band_data = calculate_performance_metrics(
+                    agg_data[agg_data['price_band'] == price_band]
+                )
+                price_band_data.columns = [
+                    f'{col}_{price_band}' if col in chart_options[selected_chart] else col 
+                    for col in price_band_data.columns
+                ]
                 if metrics_data.empty:
                     metrics_data = price_band_data
                 else:
                     metrics_data = metrics_data.merge(price_band_data, on='date')
             
-            # Update chart_options for the selected chart to include the new column names
-            chart_options[selected_chart] = [f'{metric}_{band}' for metric in chart_options[selected_chart] 
-                                           for band in selected_price_bands]
+            chart_options[selected_chart] = [
+                f'{metric}_{band}' 
+                for metric in chart_options[selected_chart] 
+                for band in price_bands_to_use
+            ]
 
         elif show_separate_zip_codes:
+            zip_codes_to_use = data['zip_code'].unique() if 'All' in selected_zip_codes else selected_zip_codes
             agg_data = filtered_data.groupby(['date', 'zip_code'])[numeric_cols].sum().reset_index()
             metrics_data = pd.DataFrame()
-            for zip_code in selected_zip_codes:
-                zip_code_data = calculate_performance_metrics(agg_data[agg_data['zip_code'] == zip_code])
-                zip_code_data.columns = [f'{col}_{zip_code}' if col in chart_options[selected_chart] else col 
+            
+            for zip_code in zip_codes_to_use:
+                # Calculate metrics for this zip code
+                zip_subset = agg_data[agg_data['zip_code'] == zip_code]
+                zip_code_data = calculate_performance_metrics(zip_subset)
+                
+                # Only keep date and the metrics we want to plot
+                metrics_to_keep = ['date'] + chart_options[selected_chart]
+                zip_code_data = zip_code_data[metrics_to_keep].copy()
+                
+                # Rename columns with suffix (except date)
+                zip_code_data.columns = ['date' if col == 'date' else f'{col}_{zip_code}' 
                                        for col in zip_code_data.columns]
+                
+                # Merge with existing data
                 if metrics_data.empty:
                     metrics_data = zip_code_data
                 else:
                     metrics_data = metrics_data.merge(zip_code_data, on='date')
-            
-            # Update chart_options for the selected chart to include the new column names
-            chart_options[selected_chart] = [f'{metric}_{zip}' for metric in chart_options[selected_chart] 
-                                           for zip in selected_zip_codes]
 
         else:
             # Original aggregation code
