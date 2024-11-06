@@ -391,34 +391,214 @@ def main():
     with tab2:
         st.header("Time Series Analysis")
         
-        metrics = st.multiselect(
-            "Select metrics to display",
-            numeric_cols,
-            default=['mls_listings', 'od_listings']
-        )
+        # Add metrics description in expandable section
+        with st.expander("Click here to understand data definitions"):
+            st.markdown("""
+            ### Field Definitions
+            
+            #### Geographic and Price Segmentation
+            - **price_band**: Original list price bucketed below and above $200K
+            - **zip_code**: A, B, C, and D denote 4 different, illustrative zips
+            
+            #### Market Activity Metrics
+            - **mls_listings**: Total active listings on the market on any given day
+            - **mls_contracts**: Resales contracts
+            
+            #### OpenDoor Activity Metrics
+            - **od_listings**: Total Opendoor active listings on the market on any given day
+            - **od_contracts**: Opendoor resales contracts
+            - **od_home_visits**: Total home visits on all active listings
+            """)
         
-        # Create time series plot with Plotly
+        # Create three columns for controls
+        ts_col1, ts_col2, ts_col3 = st.columns(3)
+        
+        with ts_col1:
+            # Single metric selector
+            metric_descriptions = {
+                'mls_listings': 'Total active listings on the market on any given day',
+                'mls_contracts': 'Resales contracts',
+                'od_listings': 'Total Opendoor active listings on the market on any given day',
+                'od_contracts': 'Opendoor resales contracts',
+                'od_home_visits': 'Total home visits on all active listings'
+            }
+            
+            selected_metric = st.selectbox(
+                "Select metric to display",
+                options=numeric_cols,
+                format_func=lambda x: x.replace('_', ' ').title()
+            )
+            
+            # Display current metric description
+            st.markdown(f"""
+            **Currently Displayed Metric:**  
+            _{metric_descriptions.get(selected_metric, '')}_ 
+            """)
+            
+            # Time period selector (matching Performance Metrics)
+            time_period = st.selectbox(
+                "Select time period",
+                options=["Daily", "Weekly", "Monthly"],
+                index=2,  # Default to Monthly
+                key="ts_time_period"
+            )
+        
+        with ts_col2:
+            # Price band filter
+            price_bands = ['All'] + list(data['price_band'].unique())
+            selected_price_bands = st.multiselect(
+                "Select Price Bands",
+                price_bands,
+                default=['All'],
+                key="ts_price_bands_select"
+            )
+            
+            # Show checkbox for price bands
+            show_separate_price_bands = st.checkbox('Show separate lines for each price band', key='ts_price_bands_checkbox')
+            
+            # Zip code filter
+            zip_codes = ['All'] + list(data['zip_code'].unique())
+            selected_zip_codes = st.multiselect(
+                "Select Zip Codes",
+                zip_codes,
+                default=['All'],
+                key="ts_zip_codes_select"
+            )
+            
+            # Show checkbox for zip codes
+            show_separate_zip_codes = st.checkbox('Show separate lines for each zip code', key='ts_zip_codes_checkbox')
+        
+        with ts_col3:
+            # Date range filters
+            min_date = data['date'].min().date()
+            max_date = data['date'].max().date()
+            start_date = st.date_input("Start Date", min_date, min_value=min_date, max_value=max_date, key="ts_start_date")
+            end_date = st.date_input("End Date", max_date, min_value=min_date, max_value=max_date, key="ts_end_date")
+        
+        # Filter data based on selections
+        ts_filtered_data = data.copy()
+        if 'All' not in selected_price_bands:
+            ts_filtered_data = ts_filtered_data[ts_filtered_data['price_band'].isin(selected_price_bands)]
+        if 'All' not in selected_zip_codes:
+            ts_filtered_data = ts_filtered_data[ts_filtered_data['zip_code'].isin(selected_zip_codes)]
+        
+        ts_filtered_data = ts_filtered_data[
+            (ts_filtered_data['date'].dt.date >= start_date) & 
+            (ts_filtered_data['date'].dt.date <= end_date)
+        ]
+        
+        # Create figure based on selections
         fig = go.Figure()
         
-        for metric in metrics:
+        if show_separate_price_bands and show_separate_zip_codes:
+            for price_band in (data['price_band'].unique() if 'All' in selected_price_bands else selected_price_bands):
+                for zip_code in (data['zip_code'].unique() if 'All' in selected_zip_codes else selected_zip_codes):
+                    subset = ts_filtered_data[
+                        (ts_filtered_data['price_band'] == price_band) & 
+                        (ts_filtered_data['zip_code'] == zip_code)
+                    ]
+                    
+                    if time_period.lower() == 'monthly':
+                        plot_data = subset.groupby(subset['date'].dt.to_period('M'))[selected_metric].mean()
+                        plot_data.index = plot_data.index.astype(str)
+                    elif time_period.lower() == 'weekly':
+                        plot_data = subset.groupby(subset['date'].dt.to_period('W'))[selected_metric].mean()
+                        plot_data.index = plot_data.index.astype(str)
+                    else:  # daily
+                        plot_data = subset.set_index('date')[selected_metric]
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=plot_data.index,
+                            y=plot_data,
+                            name=f"{price_band} - {zip_code}",
+                            mode='lines+markers',
+                            hovertemplate=f"{selected_metric}: %{{y}}<br>Date: %{{x}}<extra></extra>"
+                        )
+                    )
+        
+        elif show_separate_price_bands:
+            for price_band in (data['price_band'].unique() if 'All' in selected_price_bands else selected_price_bands):
+                subset = ts_filtered_data[ts_filtered_data['price_band'] == price_band]
+                
+                if time_period.lower() == 'monthly':
+                    plot_data = subset.groupby(subset['date'].dt.to_period('M'))[selected_metric].mean()
+                    plot_data.index = plot_data.index.astype(str)
+                elif time_period.lower() == 'weekly':
+                    plot_data = subset.groupby(subset['date'].dt.to_period('W'))[selected_metric].mean()
+                    plot_data.index = plot_data.index.astype(str)
+                else:  # daily
+                    plot_data = subset.set_index('date')[selected_metric]
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=plot_data.index,
+                        y=plot_data,
+                        name=price_band,
+                        mode='lines+markers',
+                        hovertemplate=f"{selected_metric}: %{{y}}<br>Date: %{{x}}<extra></extra>"
+                    )
+                )
+        
+        elif show_separate_zip_codes:
+            for zip_code in (data['zip_code'].unique() if 'All' in selected_zip_codes else selected_zip_codes):
+                subset = ts_filtered_data[ts_filtered_data['zip_code'] == zip_code]
+                
+                if time_period.lower() == 'monthly':
+                    plot_data = subset.groupby(subset['date'].dt.to_period('M'))[selected_metric].mean()
+                    plot_data.index = plot_data.index.astype(str)
+                elif time_period.lower() == 'weekly':
+                    plot_data = subset.groupby(subset['date'].dt.to_period('W'))[selected_metric].mean()
+                    plot_data.index = plot_data.index.astype(str)
+                else:  # daily
+                    plot_data = subset.set_index('date')[selected_metric]
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=plot_data.index,
+                        y=plot_data,
+                        name=zip_code,
+                        mode='lines+markers',
+                        hovertemplate=f"{selected_metric}: %{{y}}<br>Date: %{{x}}<extra></extra>"
+                    )
+                )
+        
+        else:
+            if time_period.lower() == 'monthly':
+                plot_data = ts_filtered_data.groupby(ts_filtered_data['date'].dt.to_period('M'))[selected_metric].mean()
+                plot_data.index = plot_data.index.astype(str)
+            elif time_period.lower() == 'weekly':
+                plot_data = ts_filtered_data.groupby(ts_filtered_data['date'].dt.to_period('W'))[selected_metric].mean()
+                plot_data.index = plot_data.index.astype(str)
+            else:  # daily
+                plot_data = ts_filtered_data.set_index('date')[selected_metric]
+            
             fig.add_trace(
                 go.Scatter(
-                    x=agg_data['date'],
-                    y=agg_data[metric],
-                    name=metric,
+                    x=plot_data.index,
+                    y=plot_data,
+                    name=selected_metric,
                     mode='lines+markers',
-                    hovertemplate=f"{metric}: %{{y}}<br>Date: %{{x}}<extra></extra>"
+                    hovertemplate=f"{selected_metric}: %{{y}}<br>Date: %{{x}}<extra></extra>"
                 )
             )
         
+        # Update layout
         fig.update_layout(
-            title="Time Series Analysis",
+            title=f"{selected_metric.replace('_', ' ').title()} Over Time ({time_period})",
             xaxis_title="Date",
-            yaxis_title="Value",
+            yaxis_title=selected_metric.replace('_', ' ').title(),
             hovermode='x unified',
+            showlegend=True,
             height=500,
             template="plotly_white",
-            showlegend=True
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=1.05
+            ),
+            margin=dict(r=150)
         )
         
         st.plotly_chart(fig, use_container_width=True)
