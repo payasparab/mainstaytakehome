@@ -50,7 +50,7 @@ def plot_selected_metrics(data_xs, selected_charts, chart_options, resample_peri
                     y=plot_data[metric],
                     name=metric,
                     mode='lines+markers',
-                    hovertemplate=f"{metric}: %{y:.3f}<br>Date: %{x}<extra></extra>"
+                    hovertemplate=f"{metric}: %{{y:.3f}}<br>Date: %{{x}}<extra></extra>"
                 )
             )
     
@@ -87,6 +87,7 @@ def main():
     # Create tabs for different views
     tab1, tab2, tab3 = st.tabs(["Performance Metrics", "Time Series", "Raw Data"])
     
+    # Create controls first
     with tab1:
         st.header("Performance Metrics")
         
@@ -172,14 +173,13 @@ def main():
             start_date = st.date_input("Start Date", min_date, min_value=min_date, max_value=max_date)
             end_date = st.date_input("End Date", max_date, min_value=min_date, max_value=max_date)
         
-        # Move filtering code here, after controls are defined
+        # Now filter the data based on selections
         filtered_data = data.copy()
         if 'All' not in selected_price_bands:
             filtered_data = filtered_data[filtered_data['price_band'].isin(selected_price_bands)]
         if 'All' not in selected_zip_codes:
             filtered_data = filtered_data[filtered_data['zip_code'].isin(selected_zip_codes)]
         
-        # Apply date filters
         filtered_data = filtered_data[
             (filtered_data['date'].dt.date >= start_date) & 
             (filtered_data['date'].dt.date <= end_date)
@@ -195,6 +195,7 @@ def main():
         # Display current chart description
         st.caption(f"📊 {chart_descriptions[selected_chart]}")
         
+        # Now display the chart
         if selected_chart:
             fig = plot_selected_metrics(
                 metrics_data, 
@@ -204,8 +205,10 @@ def main():
             )
             st.plotly_chart(fig, use_container_width=True)
             
-            # Update download functionality for Plotly
-            download_col1, download_col2 = st.columns(2)
+            st.subheader("Download Data")
+            
+            # Download options
+            download_col1, download_col2, download_col3 = st.columns(3)
             
             with download_col1:
                 # Save figure as HTML
@@ -231,12 +234,34 @@ def main():
                 
                 csv = plot_data[chart_options[selected_chart]].to_csv()
                 st.download_button(
-                    label="Download Data as CSV",
+                    label="Download Data as CSV", 
                     data=csv,
                     file_name=f"{selected_chart}_{time_period.lower()}.csv",
                     mime="text/csv"
                 )
-    
+            
+            with download_col3:
+                # Save as static image using matplotlib
+                plt.figure(figsize=(12,6))
+                for metric in chart_options[selected_chart]:
+                    plt.plot(plot_data.index, plot_data[metric], label=metric, marker='o')
+                plt.title(f"{selected_chart} Over Time ({time_period.capitalize()})")
+                plt.xlabel("Date")
+                plt.ylabel("Value")
+                plt.legend()
+                plt.grid(True)
+                
+                # Save to bytes buffer
+                img_buffer = io.BytesIO()
+                plt.savefig(img_buffer, format='png', bbox_inches='tight')
+                plt.close()
+                
+                st.download_button(
+                    label="Download as Image (PNG)",
+                    data=img_buffer.getvalue(),
+                    file_name=f"{selected_chart}_{time_period.lower()}.png",
+                    mime="image/png"
+                )
     with tab2:
         st.header("Time Series Analysis")
         
@@ -256,7 +281,7 @@ def main():
                     y=agg_data[metric],
                     name=metric,
                     mode='lines+markers',
-                    hovertemplate=f"{metric}: %{y}<br>Date: %{x}<extra></extra>"
+                    hovertemplate=f"{metric}: %{{y}}<br>Date: %{{x}}<extra></extra>"
                 )
             )
         
