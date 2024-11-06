@@ -192,8 +192,11 @@ def main():
         # Calculate performance metrics
         metrics_data = calculate_performance_metrics(agg_data)
         
-        # Display current chart description
-        st.caption(f"📊 {chart_descriptions[selected_chart]}")
+        # Display current chart description with bold title and definition
+        st.markdown(f"""
+        **Currently Displayed Metric: {selected_chart}**  
+        _{chart_descriptions[selected_chart]}_
+        """)
         
         # Now display the chart
         if selected_chart:
@@ -204,8 +207,6 @@ def main():
                 resample_period=time_period.lower()
             )
             st.plotly_chart(fig, use_container_width=True)
-            
-            st.subheader("Download Data")
             
             # Download options
             download_col1, download_col2, download_col3 = st.columns(3)
@@ -244,9 +245,11 @@ def main():
                 # Save as static image using matplotlib
                 plt.figure(figsize=(12,6))
                 for metric in chart_options[selected_chart]:
-                    plt.plot(plot_data.index, plot_data[metric], label=metric, marker='o')
+                    # Convert Period index to string for matplotlib
+                    x_values = [str(x) for x in plot_data.index]
+                    plt.plot(x_values, plot_data[metric], label=metric, marker='o')
                 plt.title(f"{selected_chart} Over Time ({time_period.capitalize()})")
-                plt.xlabel("Date")
+                plt.xlabel("Date") 
                 plt.ylabel("Value")
                 plt.legend()
                 plt.grid(True)
