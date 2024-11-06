@@ -10,6 +10,9 @@ import io
 # Set page config
 st.set_page_config(layout="wide", page_title="OpenDoor Performance Dashboard")
 
+# Set numeric columns for aggregation
+numeric_cols = ['mls_listings', 'mls_contracts', 'od_listings', 'od_contracts', 'od_home_visits']
+
 # Reference to calculate_performance_metrics function from original notebook
 # Lines 120-148 from mainstay_takehome.ipynb
 
@@ -29,10 +32,13 @@ def plot_selected_metrics(data_xs, selected_charts, chart_options, resample_peri
     """
     # Set up resampling based on selected period
     if resample_period == 'monthly':
-        plot_data = data_xs.groupby(data_xs['date'].dt.to_period('M')).mean()
+        # Only group numeric columns
+        numeric_data = data_xs[chart_options[selected_charts[0]]]  # Get only the metrics we want to plot
+        plot_data = numeric_data.groupby(data_xs['date'].dt.to_period('M')).mean()
         plot_data.index = plot_data.index.astype(str)
     elif resample_period == 'weekly':
-        plot_data = data_xs.groupby(data_xs['date'].dt.to_period('W')).mean()
+        numeric_data = data_xs[chart_options[selected_charts[0]]]
+        plot_data = numeric_data.groupby(data_xs['date'].dt.to_period('W')).mean()
         plot_data.index = plot_data.index.astype(str)
     else:  # daily
         plot_data = data_xs.set_index('date')
@@ -157,6 +163,11 @@ def main():
                 key="price_bands_select"
             )
             
+            # Add checkbox for price bands (only shown when All is not selected)
+            show_separate_price_bands = False
+            if 'All' not in selected_price_bands and len(selected_price_bands) > 1:
+                show_separate_price_bands = st.checkbox('Show separate lines for each price band', key='price_bands_checkbox')
+            
             # Zip code filter
             zip_codes = ['All'] + list(data['zip_code'].unique())
             selected_zip_codes = st.multiselect(
@@ -165,6 +176,11 @@ def main():
                 default=['All'],
                 key="zip_codes_select"
             )
+            
+            # Add checkbox for zip codes (only shown when All is not selected)
+            show_separate_zip_codes = False
+            if 'All' not in selected_zip_codes and len(selected_zip_codes) > 1:
+                show_separate_zip_codes = st.checkbox('Show separate lines for each zip code', key='zip_codes_checkbox')
         
         with control_col3:
             # Date range filters
@@ -185,12 +201,43 @@ def main():
             (filtered_data['date'].dt.date <= end_date)
         ]
         
-        # Aggregate data
-        numeric_cols = ['mls_listings', 'od_listings', 'mls_contracts', 'od_contracts', 'od_home_visits']
-        agg_data = filtered_data.groupby('date')[numeric_cols].sum().reset_index()
-        
-        # Calculate performance metrics
-        metrics_data = calculate_performance_metrics(agg_data)
+        # Modify the data aggregation section before plotting
+        if show_separate_price_bands:
+            agg_data = filtered_data.groupby(['date', 'price_band'])[numeric_cols].sum().reset_index()
+            metrics_data = pd.DataFrame()
+            for price_band in selected_price_bands:
+                price_band_data = calculate_performance_metrics(agg_data[agg_data['price_band'] == price_band])
+                price_band_data.columns = [f'{col}_{price_band}' if col in chart_options[selected_chart] else col 
+                                         for col in price_band_data.columns]
+                if metrics_data.empty:
+                    metrics_data = price_band_data
+                else:
+                    metrics_data = metrics_data.merge(price_band_data, on='date')
+            
+            # Update chart_options for the selected chart to include the new column names
+            chart_options[selected_chart] = [f'{metric}_{band}' for metric in chart_options[selected_chart] 
+                                           for band in selected_price_bands]
+
+        elif show_separate_zip_codes:
+            agg_data = filtered_data.groupby(['date', 'zip_code'])[numeric_cols].sum().reset_index()
+            metrics_data = pd.DataFrame()
+            for zip_code in selected_zip_codes:
+                zip_code_data = calculate_performance_metrics(agg_data[agg_data['zip_code'] == zip_code])
+                zip_code_data.columns = [f'{col}_{zip_code}' if col in chart_options[selected_chart] else col 
+                                       for col in zip_code_data.columns]
+                if metrics_data.empty:
+                    metrics_data = zip_code_data
+                else:
+                    metrics_data = metrics_data.merge(zip_code_data, on='date')
+            
+            # Update chart_options for the selected chart to include the new column names
+            chart_options[selected_chart] = [f'{metric}_{zip}' for metric in chart_options[selected_chart] 
+                                           for zip in selected_zip_codes]
+
+        else:
+            # Original aggregation code
+            agg_data = filtered_data.groupby('date')[numeric_cols].sum().reset_index()
+            metrics_data = calculate_performance_metrics(agg_data)
         
         # Display current chart description with bold title and definition
         st.markdown(f"""
