@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import io
 
 # Set page config
 st.set_page_config(layout="wide", page_title="OpenDoor Performance Dashboard")
@@ -21,59 +25,57 @@ def load_data():
 
 def plot_selected_metrics(data_xs, selected_charts, chart_options, resample_period='monthly'):
     """
-    Plot only the selected performance metrics.
-    
-    Args:
-        data_xs (pd.DataFrame): DataFrame containing the calculated metrics
-        selected_charts (list): List of chart names to display
-        chart_options (dict): Dictionary mapping chart names to their metrics
-        resample_period (str): Time period for resampling ('daily', 'weekly', or 'monthly')
+    Plot only the selected performance metrics using Plotly.
     """
     # Set up resampling based on selected period
     if resample_period == 'monthly':
         plot_data = data_xs.groupby(data_xs['date'].dt.to_period('M')).mean()
+        plot_data.index = plot_data.index.astype(str)
     elif resample_period == 'weekly':
         plot_data = data_xs.groupby(data_xs['date'].dt.to_period('W')).mean()
+        plot_data.index = plot_data.index.astype(str)
     else:  # daily
         plot_data = data_xs.set_index('date')
+
+    # Create figure
+    fig = go.Figure()
     
-    # Create subplot for each selected chart
-    n_charts = len(selected_charts)
-    fig, axes = plt.subplots(n_charts, 1, figsize=(12, 6 * n_charts))
-    
-    # Handle single subplot case
-    if n_charts == 1:
-        axes = [axes]
-    
-    for idx, (chart_name, ax) in enumerate(zip(selected_charts, axes)):
+    # Add traces for each metric
+    for chart_name in selected_charts:
         metrics = chart_options[chart_name]
-        
-        # Plot the metrics
-        plot_data[metrics].plot(ax=ax)
-        
-        # Add value annotations if not daily
-        if resample_period != 'daily':
-            for metric in metrics:
-                for idx_date, val in plot_data[metric].items():
-                    ax.annotate(
-                        f'{val:.3f}', 
-                        (idx_date.to_timestamp(), val), 
-                        textcoords="offset points", 
-                        xytext=(0,10), 
-                        ha='center'
-                    )
-        
-        # Add reference line for conversion vs market chart
-        if chart_name == "Contract Conversion vs Market":
-            ax.axhline(y=1, linestyle=':', color='black')
-        
-        ax.set_title(f'{chart_name} Over Time ({resample_period.capitalize()})')
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        
-        # Rotate x-axis labels for better readability
-        plt.setp(ax.get_xticklabels(), rotation=45)
+        for metric in metrics:
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_data.index,
+                    y=plot_data[metric],
+                    name=metric,
+                    mode='lines+markers',
+                    hovertemplate=f"{metric}: %{y:.3f}<br>Date: %{x}<extra></extra>"
+                )
+            )
     
-    plt.tight_layout()
+    # Add reference line for conversion vs market chart if needed
+    if "Contract Conversion vs Market" in selected_charts:
+        fig.add_hline(y=1, line_dash="dot", line_color="black", opacity=0.5)
+
+    # Update layout
+    fig.update_layout(
+        title=f"{', '.join(selected_charts)} Over Time ({resample_period.capitalize()})",
+        xaxis_title="Date",
+        yaxis_title="Value",
+        hovermode='x unified',
+        showlegend=True,
+        height=500,
+        template="plotly_white",
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=1.05
+        ),
+        margin=dict(r=150)  # Add right margin for legend
+    )
+
     return fig
 
 def main():
@@ -81,27 +83,6 @@ def main():
     
     # Load data
     data = load_data()
-    
-    
-    # Filter data based on selections
-    filtered_data = data.copy()
-    if 'All' not in selected_price_bands:
-        filtered_data = filtered_data[filtered_data['price_band'].isin(selected_price_bands)]
-    if 'All' not in selected_zip_codes:
-        filtered_data = filtered_data[filtered_data['zip_code'].isin(selected_zip_codes)]
-    
-    # Apply date filters
-    filtered_data = filtered_data[
-        (filtered_data['date'].dt.date >= start_date) & 
-        (filtered_data['date'].dt.date <= end_date)
-    ]
-    
-    # Aggregate data
-    numeric_cols = ['mls_listings', 'od_listings', 'mls_contracts', 'od_contracts', 'od_home_visits']
-    agg_data = filtered_data.groupby('date')[numeric_cols].sum().reset_index()
-    
-    # Calculate performance metrics
-    metrics_data = calculate_performance_metrics(agg_data)
     
     # Create tabs for different views
     tab1, tab2, tab3 = st.tabs(["Performance Metrics", "Time Series", "Raw Data"])
@@ -191,6 +172,26 @@ def main():
             start_date = st.date_input("Start Date", min_date, min_value=min_date, max_value=max_date)
             end_date = st.date_input("End Date", max_date, min_value=min_date, max_value=max_date)
         
+        # Move filtering code here, after controls are defined
+        filtered_data = data.copy()
+        if 'All' not in selected_price_bands:
+            filtered_data = filtered_data[filtered_data['price_band'].isin(selected_price_bands)]
+        if 'All' not in selected_zip_codes:
+            filtered_data = filtered_data[filtered_data['zip_code'].isin(selected_zip_codes)]
+        
+        # Apply date filters
+        filtered_data = filtered_data[
+            (filtered_data['date'].dt.date >= start_date) & 
+            (filtered_data['date'].dt.date <= end_date)
+        ]
+        
+        # Aggregate data
+        numeric_cols = ['mls_listings', 'od_listings', 'mls_contracts', 'od_contracts', 'od_home_visits']
+        agg_data = filtered_data.groupby('date')[numeric_cols].sum().reset_index()
+        
+        # Calculate performance metrics
+        metrics_data = calculate_performance_metrics(agg_data)
+        
         # Display current chart description
         st.caption(f"📊 {chart_descriptions[selected_chart]}")
         
@@ -201,27 +202,26 @@ def main():
                 chart_options, 
                 resample_period=time_period.lower()
             )
-            st.pyplot(fig)
+            st.plotly_chart(fig, use_container_width=True)
             
-            # Create columns for download buttons
+            # Update download functionality for Plotly
             download_col1, download_col2 = st.columns(2)
             
-            # Download chart as image
             with download_col1:
-                # Save figure to bytes buffer
-                from io import BytesIO
-                buf = BytesIO()
-                fig.savefig(buf, format="png", bbox_inches='tight')
-                btn = st.download_button(
-                    label="Download Chart as PNG",
-                    data=buf.getvalue(),
-                    file_name=f"{selected_chart}_{time_period.lower()}.png",
-                    mime="image/png"
+                # Save figure as HTML
+                buffer = io.StringIO()
+                fig.write_html(buffer)
+                html_bytes = buffer.getvalue().encode()
+                
+                st.download_button(
+                    label="Download Interactive Chart (HTML)",
+                    data=html_bytes,
+                    file_name=f"{selected_chart}_{time_period.lower()}.html",
+                    mime="text/html"
                 )
             
-            # Download data as CSV
             with download_col2:
-                # Get the plotted data
+                # Get the plotted data for CSV
                 if time_period.lower() == 'monthly':
                     plot_data = metrics_data.groupby(metrics_data['date'].dt.to_period('M')).mean()
                 elif time_period.lower() == 'weekly':
@@ -229,7 +229,6 @@ def main():
                 else:  # daily
                     plot_data = metrics_data.set_index('date')
                 
-                # Convert to CSV
                 csv = plot_data[chart_options[selected_chart]].to_csv()
                 st.download_button(
                     label="Download Data as CSV",
@@ -241,24 +240,37 @@ def main():
     with tab2:
         st.header("Time Series Analysis")
         
-        # Select metrics to display
         metrics = st.multiselect(
             "Select metrics to display",
             numeric_cols,
             default=['mls_listings', 'od_listings']
         )
         
-        # Create time series plot
-        fig, ax = plt.subplots(figsize=(12, 6))
+        # Create time series plot with Plotly
+        fig = go.Figure()
+        
         for metric in metrics:
-            ax.plot(agg_data['date'], agg_data[metric], label=metric)
+            fig.add_trace(
+                go.Scatter(
+                    x=agg_data['date'],
+                    y=agg_data[metric],
+                    name=metric,
+                    mode='lines+markers',
+                    hovertemplate=f"{metric}: %{y}<br>Date: %{x}<extra></extra>"
+                )
+            )
         
-        ax.set_title("Time Series Analysis")
-        ax.legend()
-        plt.xticks(rotation=45)
-        plt.tight_layout()
+        fig.update_layout(
+            title="Time Series Analysis",
+            xaxis_title="Date",
+            yaxis_title="Value",
+            hovermode='x unified',
+            height=500,
+            template="plotly_white",
+            showlegend=True
+        )
         
-        st.pyplot(fig)
+        st.plotly_chart(fig, use_container_width=True)
     
     with tab3:
         st.header("Raw Data")
