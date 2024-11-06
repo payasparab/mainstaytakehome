@@ -195,7 +195,9 @@ def main():
             (filtered_data['date'].dt.date <= end_date)
         ]
         
-        # Modify the data aggregation section before plotting
+        # At the start of the data processing section, before any if conditions:
+        agg_data = filtered_data.groupby('date')[numeric_cols].sum().reset_index()
+
         if show_separate_price_bands and show_separate_zip_codes:
             # Handle both cross-sections
             price_bands_to_use = data['price_band'].unique() if 'All' in selected_price_bands else selected_price_bands
@@ -233,27 +235,40 @@ def main():
             
         elif show_separate_price_bands:
             price_bands_to_use = data['price_band'].unique() if 'All' in selected_price_bands else selected_price_bands
-            agg_data = filtered_data.groupby(['date', 'price_band'])[numeric_cols].sum().reset_index()
             metrics_data = pd.DataFrame()
+            new_metric_names = []
             
             for price_band in price_bands_to_use:
-                price_band_data = calculate_performance_metrics(
-                    agg_data[agg_data['price_band'] == price_band]
-                )
-                price_band_data.columns = [
-                    f'{col}_{price_band}' if col in chart_options[selected_chart] else col 
-                    for col in price_band_data.columns
-                ]
+                # First filter data for this price band
+                price_band_subset = filtered_data[filtered_data['price_band'] == price_band]
+                
+                # Aggregate numeric columns only
+                price_band_agg = price_band_subset.groupby('date')[numeric_cols].sum().reset_index()
+                
+                # Calculate performance metrics
+                price_band_metrics = calculate_performance_metrics(price_band_agg)
+                
+                # Only keep date and relevant metrics
+                base_metrics = chart_options[selected_chart]
+                metrics_to_keep = ['date'] + base_metrics
+                price_band_metrics = price_band_metrics[metrics_to_keep].copy()
+                
+                # Rename columns with suffix
+                new_columns = ['date' if col == 'date' else f'{col}_{price_band}' 
+                             for col in price_band_metrics.columns]
+                price_band_metrics.columns = new_columns
+                
+                # Track new metric names
+                new_metric_names.extend([col for col in new_columns if col != 'date'])
+                
+                # Merge with existing data
                 if metrics_data.empty:
-                    metrics_data = price_band_data
+                    metrics_data = price_band_metrics
                 else:
-                    metrics_data = metrics_data.merge(price_band_data, on='date')
+                    metrics_data = metrics_data.merge(price_band_metrics, on='date')
             
-            chart_options[selected_chart] = [
-                f'{metric}_{band}' 
-                for metric in chart_options[selected_chart] 
-                for band in price_bands_to_use
-            ]
+            # Update chart options after all columns are created
+            chart_options[selected_chart] = new_metric_names
 
         elif show_separate_zip_codes:
             zip_codes_to_use = data['zip_code'].unique() if 'All' in selected_zip_codes else selected_zip_codes
@@ -297,8 +312,7 @@ def main():
             chart_options[selected_chart] = new_metric_names
 
         else:
-            # Original aggregation code
-            agg_data = filtered_data.groupby('date')[numeric_cols].sum().reset_index()
+            # Original aggregation code for no separate lines
             metrics_data = calculate_performance_metrics(agg_data)
         
         # Display current chart description with bold title and definition
