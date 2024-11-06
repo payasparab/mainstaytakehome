@@ -89,7 +89,7 @@ def main():
     data = load_data()
     
     # Create tabs for different views
-    tab1, tab2, tab3 = st.tabs(["Performance Metrics", "Time Series", "Raw Data"])
+    tab1, tab2, tab3 = st.tabs(["Calculated Performance Metrics", "Time Series Raw Metrics", "DownloadableRaw Data"])
     
     # Create controls first
     with tab1:
@@ -660,7 +660,119 @@ def main():
     
     with tab3:
         st.header("Raw Data")
-        st.dataframe(filtered_data)
+        
+        # Create filter columns
+        filter_col1, filter_col2, filter_col3 = st.columns(3)
+        
+        # Categorical filters
+        with filter_col1:
+            st.write("### Categorical Filters")
+            selected_price_bands = st.multiselect(
+                "Filter Price Bands",
+                options=['All'] + list(data['price_band'].unique()),
+                default=['All'],
+                key="raw_price_bands"
+            )
+            
+            selected_zip_codes = st.multiselect(
+                "Filter Zip Codes",
+                options=['All'] + list(data['zip_code'].unique()),
+                default=['All'],
+                key="raw_zip_codes"
+            )
+        
+        # Numeric filters with sliders
+        with filter_col2:
+            st.write("### Numeric Filters")
+            numeric_filters = {}
+            
+            for col in numeric_cols:
+                min_val = float(data[col].min())
+                max_val = float(data[col].max())
+                numeric_filters[col] = st.slider(
+                    f"Filter {col.replace('_', ' ').title()}",
+                    min_value=min_val,
+                    max_value=max_val,
+                    value=(min_val, max_val),
+                    key=f"raw_{col}_slider"
+                )
+        
+        # Date filters
+        with filter_col3:
+            st.write("### Date Filters")
+            min_date = data['date'].min().date()
+            max_date = data['date'].max().date()
+            start_date = st.date_input(
+                "Start Date", 
+                min_date, 
+                min_value=min_date, 
+                max_value=max_date,
+                key="raw_start_date"
+            )
+            end_date = st.date_input(
+                "End Date", 
+                max_date, 
+                min_value=min_date, 
+                max_value=max_date,
+                key="raw_end_date"
+            )
+        
+        # Apply filters to create display data
+        display_data = data.copy()
+        
+        # Apply categorical filters
+        if 'All' not in selected_price_bands:
+            display_data = display_data[display_data['price_band'].isin(selected_price_bands)]
+        if 'All' not in selected_zip_codes:
+            display_data = display_data[display_data['zip_code'].isin(selected_zip_codes)]
+        
+        # Apply numeric filters
+        for col, (min_val, max_val) in numeric_filters.items():
+            display_data = display_data[
+                (display_data[col] >= min_val) & 
+                (display_data[col] <= max_val)
+            ]
+        
+        # Apply date filters
+        display_data = display_data[
+            (display_data['date'].dt.date >= start_date) & 
+            (display_data['date'].dt.date <= end_date)
+        ]
+        
+        # Display the filtered dataframe
+        st.dataframe(
+            display_data,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "date": st.column_config.DateColumn(
+                    "Date",
+                    format="YYYY-MM-DD",
+                ),
+                "price_band": st.column_config.TextColumn(
+                    "Price Band",
+                    help="Price band: above or below $200K",
+                ),
+                "zip_code": st.column_config.TextColumn(
+                    "Zip Code",
+                    help="Illustrative zip codes A, B, C, D",
+                ),
+            }
+        )
+        
+        # Add download button for filtered data
+        csv = display_data.to_csv(index=False)
+        st.download_button(
+            label="Download Filtered Data as CSV",
+            data=csv,
+            file_name="filtered_data.csv",
+            mime="text/csv"
+        )
+        
+        # Display summary statistics
+        if st.checkbox("Show Summary Statistics"):
+            st.write("### Summary Statistics")
+            st.write(display_data.describe())
 
 def calculate_performance_metrics(data_xs):
     """Calculate key performance metrics for Opendoor vs Market performance and add them to input dataframe
